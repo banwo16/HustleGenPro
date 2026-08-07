@@ -95,12 +95,13 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY environment variable.')
 
-  // Without an explicit timeout, a slow/hanging request just sits there
-  // until the outer function runtime force-kills the whole process (which
-  // is a much uglier failure than a clean, catchable error). 20s leaves
-  // room for one retry within Netlify's function time limit.
+  // Generating 3 full pitch options + coaching feedback + a revised pitch +
+  // a recommendation in one call is a genuinely large request — this
+  // routinely takes longer than 20s, which is NOT a hang or a network
+  // problem, just how long that much generation actually takes. 45s gives
+  // real room to finish rather than cutting off legitimate work.
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20_000)
+  const timeout = setTimeout(() => controller.abort(), 45_000)
 
   let response: Response
   try {
@@ -122,7 +123,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
     })
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error('Anthropic API request timed out after 20 seconds.')
+      throw new TimeoutMarkerError('Anthropic API request timed out after 45 seconds.')
     }
     throw err
   } finally {
@@ -141,6 +142,11 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
   if (!textBlock?.text) throw new Error('Anthropic response had no text content.')
   return textBlock.text
 }
+
+/** Marks an error as a genuine timeout, so the retry logic below can treat
+ *  it differently from a "malformed JSON" style failure — retrying a slow
+ *  request just doubles the wait, it doesn't help. */
+class TimeoutMarkerError extends Error {}
 
 function validateAndParse(text: string): PitchResult {
   const json = extractJson(text)
@@ -175,10 +181,14 @@ function validateAndParse(text: string): PitchResult {
 }
 
 /**
- * Generates a pitch, retrying once on failure (matches the original
- * client-side retry behavior). Throws a clean, user-safe error message on
- * final failure — callers should NOT leak raw error details to the client
- * (see Beta Report Issues 12/17/18 — this was the original bug).
+ * Generates a pitch. Retries once on failure — but ONLY for fast,
+ * cheap-to-retry failures (e.g. the AI returned malformed JSON). A genuine
+ * timeout is NOT retried, since the request already took the full 45s;
+ * retrying would just wait another 45s for something that isn't actually
+ * broken, dragging total latency well past a minute for no benefit.
+ * Throws a clean, user-safe error message on final failure — callers
+ * should NOT leak raw error details to the client (see Beta Report Issues
+ * 12/17/18 — this was the original bug).
  */
 export async function generatePitchServerSide(
   jobPost: string,
@@ -193,6 +203,15 @@ export async function generatePitchServerSide(
     return await attempt()
   } catch (firstError) {
     console.error('[generate-pitch] First attempt failed:', firstError)
+
+    if (firstError instanceof TimeoutMarkerError) {
+      // Don't retry a timeout — fail fast with a clear message instead of
+      // making the user wait another 45s for the same likely outcome.
+      throw new Error(
+        'This is taking longer than usual. Please try again in a moment.',
+      )
+    }
+
     try {
       return await attempt()
     } catch (secondError) {
