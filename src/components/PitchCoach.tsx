@@ -354,7 +354,7 @@ export function PitchCoach() {
                   </Button>
                   {loading && (
                     <p className="text-center text-xs text-muted-foreground">
-                      Building three pitch options, coaching feedback, and your recommended version — usually under 10 seconds.
+                      Building three pitch options, coaching feedback, and your recommended version — this can take up to a minute, worth the wait.
                     </p>
                   )}
                 </CardContent>
