@@ -6,7 +6,7 @@
  * Function and calls Anthropic's API directly with a server-only key.
  *
  * NOTE ON MODEL CHOICE: the original Blink build used 'gpt-4.1-mini' (one of
- * Blink's proxied models). This version uses Claude (claude-sonnet-4-6) to
+ * Blink's proxied models). This version uses Claude (claude-sonnet-5) to
  * match the model originally specified throughout this project's build
  * docs. If you'd rather keep using OpenAI's models, this is the one place
  * that needs to change — everything else (schema, validation, retry logic)
@@ -115,7 +115,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5',
-        max_tokens: 1500,
+        max_tokens: 2200,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),
@@ -137,7 +137,17 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
 
   const data = (await response.json()) as {
     content: Array<{ type: string; text?: string }>
+    stop_reason?: string
   }
+
+  if (data.stop_reason === 'max_tokens') {
+    // Anthropic tells us explicitly when a response was cut off for
+    // running out of token budget — don't guess, just check this directly.
+    throw new Error(
+      'AI response was cut off before completing (hit the max_tokens limit).',
+    )
+  }
+
   const textBlock = data.content.find((b) => b.type === 'text')
   if (!textBlock?.text) throw new Error('Anthropic response had no text content.')
   return textBlock.text
@@ -154,6 +164,10 @@ function validateAndParse(text: string): PitchResult {
   try {
     parsed = JSON.parse(json)
   } catch {
+    // Full text goes to server logs only (never sent to the client) —
+    // this means a future parse failure is immediately diagnosable from
+    // Netlify's function logs without needing another test generation.
+    console.error('[generate-pitch] Full raw AI response that failed to parse:', text)
     throw new Error(
       `The AI returned text that couldn't be parsed as JSON. Response preview: "${text.slice(0, 200)}..."`,
     )
