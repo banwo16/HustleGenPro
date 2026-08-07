@@ -114,7 +114,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-5',
         max_tokens: 1500,
         temperature: 0.8,
         system: systemPrompt,
