@@ -112,7 +112,7 @@ export const handler: Handler = async (event) => {
       coaching_feedback: result.coachingFeedback,
       revised_pitch: result.revisedPitch,
       recommended_option: result.recommendedOption,
-      ai_model: 'claude-sonnet-4-6',
+      ai_model: 'claude-sonnet-5',
     })
     .select('id')
     .single()
