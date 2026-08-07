@@ -51,9 +51,9 @@ CRITICAL RULES:
    - Option A: Warm and personal (relationship-focused)
    - Option B: Task-focused and capable (shows they understand the work)
    - Option C: Curious and consultative (asks smart questions, positions them as a thoughtful partner)
-4. Each pitch should be 3-6 sentences. Short enough to read quickly, long enough to feel substantive.
+4. Each pitch should be 2-4 sentences — concise and punchy, not a wall of text. Short enough to read in a few seconds.
 5. Always end pitches with a clear, friendly call to action (e.g. "Would love to chat more about this!").
-6. The coaching feedback section should be constructive and encouraging — point out areas to strengthen AND note what's already working.
+6. The coaching feedback section should be constructive and encouraging (2-3 sentences) — point out one area to strengthen AND note what's already working. Keep it tight, not a lecture.
 7. The revised pitch should combine the best elements from all three options into one strengthened version.
 8. All explanations should highlight strengths first — what the pitch does well for THIS specific job.${nameContext}
 
@@ -95,13 +95,14 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY environment variable.')
 
-  // Generating 3 full pitch options + coaching feedback + a revised pitch +
-  // a recommendation in one call is a genuinely large request — this
-  // routinely takes longer than 20s, which is NOT a hang or a network
-  // problem, just how long that much generation actually takes. 45s gives
-  // real room to finish rather than cutting off legitimate work.
+  // Netlify Functions sit on top of AWS infrastructure with a HARD,
+  // non-negotiable ~29 second limit on synchronous responses — this can't
+  // be raised by any Netlify plan. If our own code waits longer than that,
+  // the connection gets silently cut before the client ever sees a
+  // response at all (which is worse than a clean error). 25s keeps us
+  // safely under that wall so we always get to respond on our own terms.
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 45_000)
+  const timeout = setTimeout(() => controller.abort(), 25_000)
 
   let response: Response
   try {
@@ -114,7 +115,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2500,
+        max_tokens: 1500,
         temperature: 0.8,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
@@ -123,7 +124,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
     })
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new TimeoutMarkerError('Anthropic API request timed out after 45 seconds.')
+      throw new TimeoutMarkerError('Anthropic API request timed out after 25 seconds.')
     }
     throw err
   } finally {
@@ -183,9 +184,9 @@ function validateAndParse(text: string): PitchResult {
 /**
  * Generates a pitch. Retries once on failure — but ONLY for fast,
  * cheap-to-retry failures (e.g. the AI returned malformed JSON). A genuine
- * timeout is NOT retried, since the request already took the full 45s;
- * retrying would just wait another 45s for something that isn't actually
- * broken, dragging total latency well past a minute for no benefit.
+ * timeout is NOT retried, since the request already took the full 25s;
+ * retrying would just wait another 25s for something that isn't actually
+ * broken, dragging total latency close to the platform's hard ceiling.
  * Throws a clean, user-safe error message on final failure — callers
  * should NOT leak raw error details to the client (see Beta Report Issues
  * 12/17/18 — this was the original bug).
@@ -206,7 +207,7 @@ export async function generatePitchServerSide(
 
     if (firstError instanceof TimeoutMarkerError) {
       // Don't retry a timeout — fail fast with a clear message instead of
-      // making the user wait another 45s for the same likely outcome.
+      // making the user wait another 25s for the same likely outcome.
       throw new Error(
         'This is taking longer than usual. Please try again in a moment.',
       )
